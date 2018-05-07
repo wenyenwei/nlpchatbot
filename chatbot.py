@@ -112,7 +112,103 @@ for token in tokens:
 
 # create inverse answerwords2int dictionary
 answersint2words = {w_i: w for w, w_i in answerwords2int.items()}
+
+# add end of string to each answers
+for i in range(len(clean_answers)):
+    clean_answers[i] += ' <EOS>'
+        
+# transform words in question to accordance int
+questions_to_int = []
+for question in clean_questions:
+    ints = []
+    for word in question.split():
+        if word not in questionswords2int:
+            ints.append(questionswords2int['<OUT>'])
+        else:
+            ints.append(questionswords2int[word])
+    questions_to_int.append(ints)
+    
+# transform words in answer to accordance int
+answers_to_int = []
+for answer in clean_answers:
+    ints = []
+    for word in answer.split():
+        if word not in answerwords2int:
+            ints.append(answerwords2int['<OUT>'])
+        else:
+            ints.append(answerwords2int[word])
+    answers_to_int.append(ints)
+    
+# sort questions and answers by length
+sorted_clean_questions = []
+sorted_clean_answers = []
+for length in range(1, 25 + 1):
+    for i in enumerate(questions_to_int):
+        if len(i[1]) == length:
+            sorted_clean_questions.append(questions_to_int[i[0]])
+            sorted_clean_answers.append(answers_to_int[i[0]])
         
         
-        
-        
+########## build seq2seq2 model #############
+
+# create placeholder for input and target
+def model_inputs():
+    inputs = tf.placeholder(tf.int32, [None, None], name = 'input')
+    targets = tf.placeholder(tf.int32, [None, None], name = 'target')
+    lr = tf.placeholder(tf.float32, name = 'learning rate')
+    keep_prob = tf.placeholder(tf.float32, name = 'keep_prob')
+    return inputs, targets, lr, keep_prob
+
+# processing target
+def preprocess_targets(targets, word2int, batch_size):
+    left_side = tf.fill([batch_size, 1], wors2int['<SOS>'])
+    right_side = tf.strided_slice(targets, [0,0], [batch_size, -1], [1,1])
+    preprocessed_targets = tf.concat([left_side, right_side],1)
+    return preprocessed_targets
+
+# create encoder RNN layer
+def encoder_rnn_layer(rnn_inputs, rnn_size, num_layers, keep_prob, sequence_length):
+    lstm = tf.contrib.rnn.BasicLSTMCell(rnn_size)
+    lstm_dropout = tf.contrib.rnn.DropoutWrapper(lstm, input_keep_prob = keep_prob)
+    encoder_cell = tf.contrib.MultiRNNCell([lstm_dropout] * num_layers)
+    _, encoder_state = tf.nn.bidirectional_dynamic_rnn(cell_fw = encoder_cell,
+                                                       cell_bw = encoder_cell,
+                                                       sequence_length = sequence_length,
+                                                       inputs = rnn_inputs,
+                                                       dtype = tf.float32)
+    return encoder_state
+
+# decoding training set
+def decode_training_set(encoder_state, decoder_cell, decoder_embedded_input, sequence_length, decoding_scope, output_function, keep_prob, batch_size):
+    attention_states = tf.zeros([batch_size, 1, decoder_cell.output_size])
+    attention_keys, attention_values, attention_score_function, attention_construct_function = tf.contrib.seq2seq.prepare_attention(attention_states, attention_option = "bahdanau", num_units = decoder_cell.output_size)
+    training_decoder_function = tf.contrib.seq2seq.attention_decoder_fn_train(encoder_state[0],
+                                                                              attention_keys,
+                                                                              attention_values,
+                                                                              attention_score_function,
+                                                                              attention_construct_function,
+                                                                              name = "attn_dec_train")
+    decoder_output, decoder_final_state, decoder_final_context_state = tf.contrib.seq2seq.dynamic_rnn_decoder(decoder_cell,
+                                                                                                              training_decoder_function,
+                                                                                                              decoder_embedded_input,
+                                                                                                              sequence_length,
+                                                                                                              scope = decoding_scope)
+    decoder_output_dropout = tf.nn.dropout(decoder_output, keep_prob)
+    return output_function(decoder_output_dropout)
+
+######### training seq2seq model ###########
+epochs = 100
+batch_size = 64
+rnn_size = 512
+num_layer = 3
+encoding_embedding_size = 512
+decoding_embedding_size = 512
+learning_rate = 0.01
+learning_rate_decay = 0.9
+min_learning_rate = 0.0001
+keep_probability = 0.5
+
+
+
+    
+            
